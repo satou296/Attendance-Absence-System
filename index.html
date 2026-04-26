@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; transition: background 0.3s; }
+    #video-container { position: relative; width: 100%; max-width: 500px; margin: 0 auto; }
+    canvas { width: 100%; border: 2px solid #ccc; border-radius: 8px; }
+    #result-message { margin-top: 20px; padding: 15px; font-size: 1.2em; font-weight: bold; border-radius: 5px; min-height: 1.5em; }
+    .loading { color: #666; }
+  </style>
+</head>
+<body>
+  <h2>QR受付スキャナー</h2>
+  <div id="video-container">
+    <canvas id="canvas" hidden></canvas>
+    <div id="loading-msg">📷 カメラを起動中...</div>
+  </div>
+  <div id="result-message">QRコードをスキャンしてください</div>
+
+  <script>
+    const video = document.createElement("video");
+    const canvasElement = document.getElementById("canvas");
+    const canvas = canvasElement.getContext("2d");
+    const loadingMsg = document.getElementById("loading-msg");
+    const resultMsg = document.getElementById("result-message");
+    
+    let isScanning = true;
+
+    // カメラの開始
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
+      video.srcObject = stream;
+      video.setAttribute("playsinline", true);
+      video.play();
+      requestAnimationFrame(tick);
+    });
+
+    function tick() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        loadingMsg.hidden = true;
+        canvasElement.hidden = false;
+
+        canvasElement.height = video.videoHeight;
+        canvasElement.width = video.videoWidth;
+        canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+        
+        if (isScanning) {
+          const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert",
+          });
+
+          if (code) {
+            // ConnpassのURLからIDを抽出（URL全体でもID単体でも対応可能にするための簡易処理）
+            const scannedValue = extractId(code.data);
+            processAttendance(scannedValue);
+          }
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+
+    function extractId(data) {
+      // 例: https://connpass.com/event/12345/ のようなURLから末尾の数字を拾う場合など
+      // 今回は単純に読み取った値そのものをIDとして送信します
+      return data.split('/').filter(Boolean).pop();
+    }
+
+    function processAttendance(id) {
+      isScanning = false; // 連続送信防止
+      resultMsg.innerText = "照合中...";
+      
+      google.script.run
+        .withSuccessHandler((res) => {
+          document.body.style.backgroundColor = res.color;
+          resultMsg.innerText = res.message;
+          
+          // 音声フィードバック（ブラウザ制限があるため、クリック後に有効化されることが多い）
+          playBeep(res.success);
+
+          // 3秒後にスキャン再開
+          setTimeout(() => {
+            document.body.style.backgroundColor = "#ffffff";
+            resultMsg.innerText = "QRコードをスキャンしてください";
+            isScanning = true;
+          }, 3000);
+        })
+        .updateUserStatus(id);
+    }
+
+    function playBeep(success) {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      oscillator.type = success ? 'sine' : 'square';
+      oscillator.frequency.setValueAtTime(success ? 880 : 200, audioCtx.currentTime);
+      oscillator.connect(audioCtx.destination);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.2);
+    }
+  </script>
+</body>
+</html>
