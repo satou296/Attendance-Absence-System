@@ -1,5 +1,5 @@
 function doGet() {
-  return HtmlService.createTemplateFromFile('index')
+  return HtmlService.createTemplateFromFile('index.html')
     .evaluate()
     .setTitle('QR受付システム')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
