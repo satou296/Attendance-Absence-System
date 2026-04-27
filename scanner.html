@@ -1,0 +1,25 @@
+<script>
+    const GAS_URL = "ここにデプロイしたURLを貼り付ける";
+
+    function processAttendance(id) {
+      isScanning = false;
+      resultMsg.innerText = "照合中...";
+      
+      // GASにデータを送信
+      fetch(`${GAS_URL}?id=${id}`)
+        .then(response => response.json())
+        .then(res => {
+          document.body.style.backgroundColor = res.color;
+          resultMsg.innerText = res.message;
+          setTimeout(() => {
+            document.body.style.backgroundColor = "#ffffff";
+            resultMsg.innerText = "QRコードをスキャンしてください";
+            isScanning = true;
+          }, 3000);
+        })
+        .catch(err => {
+          alert("エラー: " + err);
+          isScanning = true;
+        });
+    }
+</script>
