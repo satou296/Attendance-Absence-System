@@ -6,7 +6,7 @@
   <title>QR受付スキャナー</title>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; margin: 0; padding: 0; transition: background 0.3s; }
+    body { font-family: sans-serif; text-align: center; margin: 0; padding: 0; transition: background 0.3s; cursor: pointer; }
     #container { padding: 20px; }
     #video-container { position: relative; width: 100%; max-width: 400px; margin: 20px auto; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
     video { width: 100%; vertical-align: bottom; }
@@ -29,26 +29,32 @@
   </div>
 
   <script>
-    // --- 設定: ここにデプロイしたGASのURLを貼り付けてください ---
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbyJFsBBOQi8pMJdFuZPq9-bNMDj6uEzgr9Hs4dWYY4hKXlugWHVl_s3JyVK6gT3NmMp/exec";
+    const GAS_URL = "ここにデプロイしたGASのURLを貼り付け";
 
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
     const infoDiv = document.getElementById('info');
     let isScanning = true;
 
+    // --- AudioContextを初期化 ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContext();
+
+    // --- カメラセットアップ ---
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(stream => {
       video.srcObject = stream;
       video.play();
       requestAnimationFrame(tick);
     });
 
+    // --- tick関数を定義 ---
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
     function tick() {
       if (video.readyState === video.HAVE_ENOUGH_DATA && isScanning) {
-        const canvas = document.createElement("canvas");
         canvas.height = video.videoHeight;
         canvas.width = video.videoWidth;
-        const ctx = canvas.getContext("2d");
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const code = jsQR(imgData.data, imgData.width, imgData.height);
@@ -64,17 +70,19 @@
       isScanning = false;
       statusDiv.innerText = "照合中...";
       
+      // AudioContextの再開（ブラウザ制限解除のため）
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
       const id = rawData.split('/').pop();
 
       try {
-        // GASウェブアプリへのリクエスト (CORS対応)
         const response = await fetch(`${GAS_URL}?id=${id}`);
         const res = await response.json();
-        
         applyResult(res);
       } catch (e) {
-        alert("通信エラーが発生しました。GASのURLと公開設定を確認してください。");
-        console.error(e);
+        alert("通信エラーが発生しました。");
         resetScan();
       }
     }
@@ -86,11 +94,9 @@
                             res.status === "already" ? "確認済み" : "エラー";
       infoDiv.innerText = res.message;
       
-      // 音声フィードバック
       const freq = res.status === "success" ? 880 : 220;
-      beep(300, freq);
+      playBeep(300, freq);
 
-      // 3秒後にスキャン再開
       setTimeout(resetScan, 3000);
     }
 
@@ -101,16 +107,26 @@
       isScanning = true;
     }
 
-    function beep(dur, freq) {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
+    // --- AudioContextを呼び出して音を鳴らす関数 ---
+    function playBeep(dur, freq) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
       osc.frequency.value = freq;
       osc.start();
-      gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + dur/1000);
-      osc.stop(ctx.currentTime + dur/1000);
+      
+      // 音を減衰させて消す
+      gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + dur/1000);
+      osc.stop(audioCtx.currentTime + dur/1000);
     }
+
+    // 画面クリック時にもAudioContextを有効化（念のため）
+    document.body.addEventListener('click', () => {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    });
   </script>
 </body>
 </html>
