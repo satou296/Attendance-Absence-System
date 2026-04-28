@@ -1,41 +1,44 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR受付スキャナー</title>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <style>
     body { font-family: sans-serif; text-align: center; margin: 0; padding: 0; transition: background 0.3s; }
     #container { padding: 20px; }
-    #video-container { position: relative; width: 100%; max-width: 400px; margin: 0 auto; }
-    video { width: 100%; border-radius: 8px; border: 4px solid #ccc; }
-    #status-display { margin-top: 20px; font-weight: bold; font-size: 1.2em; min-height: 1.5em; }
-    .success { background-color: #d4edda !important; color: #155724; }
-    .error { background-color: #f8d7da !important; color: #721c24; }
-    .warning { background-color: #fff3cd !important; color: #856404; }
-    #loading { color: #666; }
+    #video-container { position: relative; width: 100%; max-width: 400px; margin: 20px auto; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+    video { width: 100%; vertical-align: bottom; }
+    #status { margin-top: 20px; font-weight: bold; font-size: 1.4em; min-height: 1.5em; }
+    #info { font-size: 1.1em; color: #555; margin-top: 10px; }
+    .success { background-color: #28a745 !important; color: white; }
+    .error { background-color: #dc3545 !important; color: white; }
+    .warning { background-color: #ffc107 !important; color: #212529; }
+    .success #info, .error #info { color: white; }
   </style>
 </head>
 <body>
   <div id="container">
-    <h2>受付スキャナー</h2>
+    <h2>QR受付システム</h2>
     <div id="video-container">
       <video id="video" playsinline></video>
     </div>
-    <div id="status-display">カメラを起動中...</div>
-    <p id="user-info"></p>
+    <div id="status">スキャン待機中...</div>
+    <div id="info">ConnpassのQRコードをかざしてください</div>
   </div>
 
   <script>
+    // --- 設定: ここにデプロイしたGASのURLを貼り付けてください ---
+    const GAS_URL = "ここにコピーしたGASのURLを貼り付け";
+
     const video = document.getElementById('video');
-    const statusDisplay = document.getElementById('status-display');
-    const userInfo = document.getElementById('user-info');
-    const body = document.body;
+    const statusDiv = document.getElementById('status');
+    const infoDiv = document.getElementById('info');
     let isScanning = true;
 
-    // カメラのセットアップ
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then((stream) => {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(stream => {
       video.srcObject = stream;
-      video.setAttribute("playsinline", true);
       video.play();
       requestAnimationFrame(tick);
     });
@@ -47,68 +50,66 @@
         canvas.width = video.videoWidth;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imgData.data, imgData.width, imgData.height);
 
         if (code) {
-          processCode(code.data);
+          handleScan(code.data);
         }
       }
       requestAnimationFrame(tick);
     }
 
-    function processCode(data) {
-      isScanning = false; // 二重読み取り防止
-      statusDisplay.innerText = "照合中...";
+    async function handleScan(rawData) {
+      isScanning = false;
+      statusDiv.innerText = "照合中...";
       
-      // ConnpassのURL等からIDを抽出するロジック（環境に合わせて調整可）
-      // ここでは簡易的に読み取った値そのものをIDとして送信
-      const id = data.split('/').pop(); 
+      const id = rawData.split('/').pop();
 
-      google.script.run
-        .withSuccessHandler((res) => {
-          handleResult(res);
-          // 2秒後にスキャン再開
-          setTimeout(() => { resetUI(); }, 2000);
-        })
-        .updateAttendance(id);
-    }
-
-    function handleResult(res) {
-      if (res.status === "success") {
-        body.className = "success";
-        statusDisplay.innerText = "成功！";
-        userInfo.innerText = res.name + " さん、ようこそ！";
-        beep(200, 440); // ピッ
-      } else if (res.status === "already") {
-        body.className = "warning";
-        statusDisplay.innerText = "警告：受付済み";
-        userInfo.innerText = res.name + " さんは既にチェックインしています。";
-        beep(400, 220); // ブッ
-      } else {
-        body.className = "error";
-        statusDisplay.innerText = "エラー：未登録";
-        userInfo.innerText = "このQRコードは名簿に存在しません。";
-        beep(400, 220); // ブッ
+      try {
+        // GASウェブアプリへのリクエスト (CORS対応)
+        const response = await fetch(`${GAS_URL}?id=${id}`);
+        const res = await response.json();
+        
+        applyResult(res);
+      } catch (e) {
+        alert("通信エラーが発生しました。GASのURLと公開設定を確認してください。");
+        console.error(e);
+        resetScan();
       }
     }
 
-    function resetUI() {
-      body.className = "";
-      statusDisplay.innerText = "スキャン待機中...";
-      userInfo.innerText = "";
+    function applyResult(res) {
+      document.body.className = res.status === "success" ? "success" : 
+                               res.status === "already" ? "warning" : "error";
+      statusDiv.innerText = res.status === "success" ? "成功！" : 
+                            res.status === "already" ? "確認済み" : "エラー";
+      infoDiv.innerText = res.message;
+      
+      // 音声フィードバック
+      const freq = res.status === "success" ? 880 : 220;
+      beep(300, freq);
+
+      // 3秒後にスキャン再開
+      setTimeout(resetScan, 3000);
+    }
+
+    function resetScan() {
+      document.body.className = "";
+      statusDiv.innerText = "スキャン待機中...";
+      infoDiv.innerText = "次の参加者のQRをかざしてください";
       isScanning = true;
     }
 
-    // 音声フィードバック用
-    function beep(duration, frequency) {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioCtx.createOscillator();
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
-      oscillator.connect(audioCtx.destination);
-      oscillator.start();
-      oscillator.stop(audioCtx.currentTime + (duration / 1000));
+    function beep(dur, freq) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + dur/1000);
+      osc.stop(ctx.currentTime + dur/1000);
     }
   </script>
 </body>
